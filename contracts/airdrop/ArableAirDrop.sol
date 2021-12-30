@@ -13,7 +13,7 @@ import "../interfaces/staking/IDStakingOverview.sol";
 
 /**
  * @title ArableAirdrop
- * 
+ *
  * This contract is for giving airdrop based on the information put on the database
  * The basic amount is given by bot and at that time, each user's allocation is determined
  * After that users who perform required actions to get further allocation can claim more airdrops
@@ -73,8 +73,8 @@ contract ArableAirDrop is Ownable, ReentrancyGuard {
     }
 
     /**
-    *  function to claim bonus airdrop for more interest on the project when join
-    */
+     *  function to claim bonus airdrop for more interest on the project when join
+     */
     function claimInit() external canClaimAirDrop {
         require(users[msg.sender].init == 0, "Already claimed");
         uint256 amount = users[msg.sender].basic * 2;
@@ -84,8 +84,8 @@ contract ArableAirDrop is Ownable, ReentrancyGuard {
     }
 
     /**
-    *  function to claim bonus airdrop for putting the token on liquidity mining contract
-    */
+     *  function to claim bonus airdrop for putting the token on liquidity mining contract
+     */
     function claimFarm() external canClaimAirDrop {
         require(farm.getDepositAmount(msg.sender, 0) > 0, "Not delegated on farm");
         require(users[msg.sender].farm == 0, "Already claimed");
@@ -96,8 +96,8 @@ contract ArableAirDrop is Ownable, ReentrancyGuard {
     }
 
     /**
-    *  function to claim bonus airdrop for staking the token on the contract
-    */
+     *  function to claim bonus airdrop for staking the token on the contract
+     */
     function claimStake() external canClaimAirDrop {
         require(
             staking.getDepositAmount(msg.sender) > 0 || dstakingOverview.userDelegated(msg.sender) > 0,
@@ -120,16 +120,16 @@ contract ArableAirDrop is Ownable, ReentrancyGuard {
     }
 
     /**
-    * Bulk function to allocate basic airdrop to users from the database
-    * caller: owner
-    */
+     * Bulk function to allocate basic airdrop to users from the database
+     * caller: owner
+     */
     function handleBasicAirDrop(address addr, uint256 amount) external onlyOwner {
         _handleBasicAirDrop(addr, amount);
     }
 
     /**
-    * Bulk function to reduce gas fees and time spent on basic airdrop
-    */
+     * Bulk function to reduce gas fees and time spent on basic airdrop
+     */
     function handleBasicAirDrops(address[] calldata addrs, uint256[] calldata amounts) external onlyOwner {
         require(addrs.length == amounts.length, "Invalid params");
 
@@ -147,5 +147,19 @@ contract ArableAirDrop is Ownable, ReentrancyGuard {
     function withdrawToken() external onlyOwner {
         uint256 balance = token.balanceOf(address(this));
         token.safeTransfer(msg.sender, balance);
+    }
+
+    function setAddresses(
+        IFarming _farm,
+        IStaking _staking,
+        IDStakingOverview _dstakingOverview
+    ) external onlyOwner {
+        require(address(_farm) != address(0), "Invalid _farm");
+        require(address(_staking) != address(0), "Invalid _staking");
+        require(address(_dstakingOverview) != address(0), "Invalid _dstakingOverview");
+
+        farm = _farm;
+        staking = _staking;
+        dstakingOverview = _dstakingOverview;
     }
 }

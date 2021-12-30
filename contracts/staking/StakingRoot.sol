@@ -52,7 +52,11 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
 
     uint256 public constant DSTAKING_LIMIT = 50; // validator count limitation
 
-    event DStakingRegistered(address creator, address dStaking, uint256 commissionRate);
+    event DStakingRegistered(
+        address creator,
+        address dStaking,
+        uint256 commissionRate
+    );
     event DStakingRemoved(address dStaking);
     event StakingRewardsClaimed(address beneficiary, uint256 amount);
     event DStakingRewardsClaimed(address beneficiary, uint256 amount);
@@ -80,13 +84,24 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         return removedDStakings.length;
     }
 
-    function getRewardsInfo(address dStaking) public view returns (RewardsInfo memory) {
+    function getDStakingRewardInfosCount() external view returns (uint256) {
+        return dStakingRewardInfos.length;
+    }
+
+    function getRewardsInfo(address dStaking)
+        public
+        view
+        returns (RewardsInfo memory)
+    {
         return dStakingRewardInfos[dStakingIndex[dStaking]];
     }
 
     function registerDStaking(uint256 amount, uint256 commissionRate) external {
         require(amount >= minTokenAmountForDStaker, "Low amount!");
-        require(isDStakingCreationAllowed[msg.sender], "Not allowed to register DStaking");
+        require(
+            isDStakingCreationAllowed[msg.sender],
+            "Not allowed to register DStaking"
+        );
         require(dStakingCount < DSTAKING_LIMIT, "Limit");
         require(!dStakingCreated[msg.sender], "Already created");
 
@@ -104,7 +119,9 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         token.approve(dStakingAddr, amount);
         dStaking.initDeposit(address(this), msg.sender, amount);
 
-        dStakingRewardInfos.push(RewardsInfo({ addr: dStakingAddr, rewardsAmount: 0 }));
+        dStakingRewardInfos.push(
+            RewardsInfo({addr: dStakingAddr, rewardsAmount: 0})
+        );
 
         dStakingCount++;
 
@@ -115,14 +132,20 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         emit DStakingRegistered(msg.sender, dStakingAddr, commissionRate);
     }
 
-    function removeDStaking(address dStaking) external onlyDStakingCreator(dStaking, msg.sender) {
+    function removeDStaking(address dStaking)
+        external
+        onlyDStakingCreator(dStaking, msg.sender)
+    {
         _distributeRewards();
 
         RewardsInfo memory info = getRewardsInfo(dStaking);
         uint256 curIndex = dStakingIndex[dStaking];
 
         if (info.rewardsAmount > 0) {
-            uint256 claimedAmount = safeTokenTransfer(dStaking, info.rewardsAmount);
+            uint256 claimedAmount = safeTokenTransfer(
+                dStaking,
+                info.rewardsAmount
+            );
             emit DStakingRewardsClaimed(msg.sender, claimedAmount);
             totalReleased += claimedAmount;
         }
@@ -130,14 +153,18 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         isDStakingRemoved[dStaking] = true;
 
         if (curIndex == dStakingCount - 1) {
-            delete dStakingRewardInfos[curIndex];
+            dStakingRewardInfos.pop();
             dStakingCount--;
             delete dStakingIndex[dStaking];
         } else {
             dStakingCount--;
-            dStakingRewardInfos[curIndex].addr = dStakingRewardInfos[dStakingCount].addr;
-            dStakingRewardInfos[curIndex].rewardsAmount = dStakingRewardInfos[dStakingCount].rewardsAmount;
-            delete dStakingRewardInfos[dStakingCount];
+            dStakingRewardInfos[curIndex].addr = dStakingRewardInfos[
+                dStakingCount
+            ].addr;
+            dStakingRewardInfos[curIndex].rewardsAmount = dStakingRewardInfos[
+                dStakingCount
+            ].rewardsAmount;
+            dStakingRewardInfos.pop();
             dStakingIndex[dStakingRewardInfos[curIndex].addr] = curIndex;
             delete dStakingIndex[dStaking];
         }
@@ -149,27 +176,33 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
 
     function _distributeRewards() private {
         // (totalDistributed - totalReleased) is the sum of members' pending amounts
-        uint256 pendingRewards = IERC20(token).balanceOf(address(this)) + totalReleased - totalDistributed;
+        uint256 pendingRewards = IERC20(token).balanceOf(address(this)) +
+            totalReleased -
+            totalDistributed;
 
         if (pendingRewards > 0) {
             uint256 totalAllocation = 0;
             for (uint256 index = 0; index < dStakingCount; index++) {
-                totalAllocation += IDStaking(dStakingRewardInfos[index].addr).getTotalDelegatedAmount();
+                totalAllocation += IDStaking(dStakingRewardInfos[index].addr)
+                    .getTotalDelegatedAmount();
             }
 
-            uint256 stakingAllocation = (IStaking(staking).getTotalDepositAmount() * stakingMultiplier) /
-                BASE_MULTIPLIER;
+            uint256 stakingAllocation = (IStaking(staking)
+                .getTotalDepositAmount() * stakingMultiplier) / BASE_MULTIPLIER;
             totalAllocation += stakingAllocation;
 
             if (totalAllocation > 0) {
                 for (uint256 index = 0; index < dStakingCount; index++) {
-                    uint256 dstaked = IDStaking(dStakingRewardInfos[index].addr).getTotalDelegatedAmount();
-                    uint256 newRewards = (pendingRewards * dstaked) / totalAllocation;
+                    uint256 dstaked = IDStaking(dStakingRewardInfos[index].addr)
+                        .getTotalDelegatedAmount();
+                    uint256 newRewards = (pendingRewards * dstaked) /
+                        totalAllocation;
                     dStakingRewardInfos[index].rewardsAmount += newRewards;
                     totalDistributed += newRewards;
                 }
 
-                uint256 stakingRewards = (pendingRewards * stakingAllocation) / totalAllocation;
+                uint256 stakingRewards = (pendingRewards * stakingAllocation) /
+                    totalAllocation;
 
                 stakingInfo.rewardsAmount += stakingRewards;
                 totalDistributed += stakingRewards;
@@ -181,13 +214,19 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         _distributeRewards();
     }
 
-    function claimRewards() external override onlyStakingOrDStaking(msg.sender) {
+    function claimRewards()
+        external
+        override
+        onlyStakingOrDStaking(msg.sender)
+    {
         if (msg.sender == staking) {
             // staking rewards claim
             uint256 rewards = stakingInfo.rewardsAmount;
             if (rewards > 0) {
                 uint256 claimedAmount = safeTokenTransfer(msg.sender, rewards);
-                stakingInfo.rewardsAmount = stakingInfo.rewardsAmount - claimedAmount;
+                stakingInfo.rewardsAmount =
+                    stakingInfo.rewardsAmount -
+                    claimedAmount;
 
                 totalReleased += claimedAmount;
 
@@ -200,7 +239,8 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
             if (rewards > 0) {
                 uint256 claimedAmount = safeTokenTransfer(msg.sender, rewards);
 
-                dStakingRewardInfos[dStakingIndex[msg.sender]].rewardsAmount -= claimedAmount;
+                dStakingRewardInfos[dStakingIndex[msg.sender]]
+                    .rewardsAmount -= claimedAmount;
 
                 totalReleased += claimedAmount;
 
@@ -209,7 +249,10 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         }
     }
 
-    function safeTokenTransfer(address to, uint256 amount) internal returns (uint256) {
+    function safeTokenTransfer(address to, uint256 amount)
+        internal
+        returns (uint256)
+    {
         uint256 bal = token.balanceOf(address(this));
 
         if (bal >= amount) {
@@ -242,7 +285,10 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         stakingMultiplier = _multiplier;
     }
 
-    function setMinTokenAmountForDStaking(uint256 _minTokenAmountForDStaker) external onlyOwner {
+    function setMinTokenAmountForDStaking(uint256 _minTokenAmountForDStaker)
+        external
+        onlyOwner
+    {
         minTokenAmountForDStaker = _minTokenAmountForDStaker;
     }
 
@@ -252,10 +298,26 @@ contract StakingRoot is ArableAccessControl, IStakingRoot {
         address beneficiary
     ) external onlyOwner {
         require(beneficiary != address(0), "Invalid beneficiary");
-        IStaking(_staking).withdrawAnyToken(address(token), amount, beneficiary);
+        IStaking(_staking).withdrawAnyToken(
+            address(token),
+            amount,
+            beneficiary
+        );
     }
 
-    function setDStakingCreationAllowed(address creator, bool allowed) external onlyOwner {
+    function setDStakingCreationAllowed(address creator, bool allowed)
+        external
+        onlyOwner
+    {
         isDStakingCreationAllowed[creator] = allowed;
+    }
+
+    function setDStakingCreationsAllowed(
+        address[] calldata creators,
+        bool allowed
+    ) external onlyOwner {
+        for (uint256 index = 0; index < creators.length; index++) {
+            isDStakingCreationAllowed[creators[index]] = allowed;
+        }
     }
 }
