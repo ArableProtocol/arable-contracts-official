@@ -14,7 +14,7 @@
 - DStakingOverview: 0x08AA2E4044CCd3Dc37b72028A0662F585728633c[https://testnet.snowtrace.io/address/0x08AA2E4044CCd3Dc37b72028A0662F585728633c]
 - Farming: 0xa4577fD2fFD4dde52054D284d293732ca9d0c894[https://testnet.snowtrace.io/address/0xa4577fD2fFD4dde52054D284d293732ca9d0c894]
 - AirDrop: 0x0439eEf195A2976A648701f31c2C656E4279692b[https://testnet.snowtrace.io/address/0x0439eEf195A2976A648701f31c2C656E4279692b]
-- OTC: 0x6E1b0CBD208dAB41cE498D4840481B09409324D5[https://testnet.snowtrace.io/address/0x6E1b0CBD208dAB41cE498D4840481B09409324D5]
+- OTC: 0x77b39A58b77c4CC7991bdec015b3eEEbA349C3fb[https://testnet.snowtrace.io/address/0x77b39A58b77c4CC7991bdec015b3eEEbA349C3fb]
 
 - ArableFaucet: 0xcdf5e1EC6ACDC40b8f9db95c1BA465A5dd8cE1A0[https://testnet.snowtrace.io/address/0xcdf5e1EC6ACDC40b8f9db95c1BA465A5dd8cE1A0]
 - Pangolin Factory: 0xE4A575550C2b460d2307b82dCd7aFe84AD1484dd[https://testnet.snowtrace.io/address/0xE4A575550C2b460d2307b82dCd7aFe84AD1484dd]
