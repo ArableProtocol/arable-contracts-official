@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 import "../interfaces/staking/IFarming.sol";
 import "../interfaces/staking/ITokenLocker.sol";
@@ -16,7 +17,7 @@ import "../interfaces/staking/IFarmingFactory.sol";
  * @notice Contract that distribute rewards to multiple pools based on allocation point ratio
  *
  */
-contract Farming is Ownable, ReentrancyGuard, IFarming {
+contract Farming is Ownable, ReentrancyGuard, IFarming, Pausable {
     using SafeERC20 for IERC20;
 
     struct UserInfo {
@@ -50,6 +51,9 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
     event RequestWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Claim(address indexed user, uint256 indexed pid, uint256 amount);
     event PoolAdded(uint256 pid, uint256 allocPoint, uint256 lockupDuration, address lp);
+    event PoolLockDurationChanged(uint256 pid, uint256 lockupDuration);
+    event Pause();
+    event Unpause();
 
     modifier validatePoolByPid(uint256 _pid) {
         require(_pid < poolInfo.length, "Pool does not exist");
@@ -127,14 +131,14 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
             return;
         }
 
-        user.pendingRewards += accumulativeRewards(user.amount, pool.accTokenPerShare)- user.rewardDebt;
+        user.pendingRewards += accumulativeRewards(user.amount, pool.accTokenPerShare) - user.rewardDebt;
     }
 
     function deposit(
         uint256 _pid,
         uint256 _amount,
         bool _withdrawRewards
-    ) public validatePoolByPid(_pid) {
+    ) public validatePoolByPid(_pid) whenNotPaused nonReentrant {
         require(_amount > 0, "amount should be positive");
 
         massUpdatePools();
@@ -156,8 +160,7 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
         uint256 _pid,
         uint256 _amount,
         bool _withdrawRewards
-    ) public nonReentrant validatePoolByPid(_pid) {
-
+    ) public nonReentrant validatePoolByPid(_pid) whenNotPaused {
         massUpdatePools();
         _updateUserPendingRewards(_pid, msg.sender);
 
@@ -192,7 +195,7 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
         totalReleased += amount;
     }
 
-    function claim(uint256 _pid) public nonReentrant validatePoolByPid(_pid) {
+    function claim(uint256 _pid) public nonReentrant validatePoolByPid(_pid) whenNotPaused {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         massUpdatePools();
@@ -205,10 +208,10 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
     function safeTokenTransfer(address _to, uint256 _amount) internal returns (uint256) {
         uint256 tokenBal = IERC20(token).balanceOf(address(this));
         if (_amount > tokenBal) {
-            IERC20(token).transfer(_to, tokenBal);
+            IERC20(token).safeTransfer(_to, tokenBal);
             return tokenBal;
         } else {
-            IERC20(token).transfer(_to, _amount);
+            IERC20(token).safeTransfer(_to, _amount);
             return _amount;
         }
     }
@@ -225,6 +228,12 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
 
     function withdrawAnyToken(IERC20 _token, uint256 amount) external onlyOwner {
         _token.safeTransfer(msg.sender, amount);
+    }
+
+    function updatePoolDuration(uint256 _pid, uint256 _lockupDuration) external onlyOwner validatePoolByPid(_pid) {
+        poolInfo[_pid].lockupDuration = _lockupDuration;
+
+        emit PoolLockDurationChanged(_pid, _lockupDuration);
     }
 
     function addPool(
@@ -265,5 +274,23 @@ contract Farming is Ownable, ReentrancyGuard, IFarming {
         }
         totalAllocPoint = totalAllocPoint - (poolInfo[_pid].allocPoint) + (_allocPoint);
         poolInfo[_pid].allocPoint = _allocPoint;
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 }

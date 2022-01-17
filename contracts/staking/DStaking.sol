@@ -62,6 +62,7 @@ contract DStaking is Ownable, IDStaking, ReentrancyGuard {
     event Redelegate(address indexed user, address toDStaking, uint256 amount);
     event CommissionRateUpdated(uint256 commissionRate);
     event CommissionRewardClaimed(uint256 claimedAmount);
+    event PoolLockDurationChanged(uint256 lockupDuration);
 
     modifier onlyRoot() {
         require(msg.sender == address(stakingRoot), "Not StakingRoot");
@@ -89,6 +90,14 @@ contract DStaking is Ownable, IDStaking, ReentrancyGuard {
         lastCommissionRateUpdateTimeStamp = block.timestamp;
 
         poolInfo.lockupDuration = 14 days;
+
+        emit PoolLockDurationChanged(poolInfo.lockupDuration);
+    }
+
+    function updatePoolDuration(uint256 _lockupDuration) external override onlyRoot {
+        poolInfo.lockupDuration = _lockupDuration;
+
+        emit PoolLockDurationChanged(_lockupDuration);
     }
 
     // The creator of this contract
@@ -213,6 +222,11 @@ contract DStaking is Ownable, IDStaking, ReentrancyGuard {
 
         uint256 total = (claimedAmount * COMMION_RATE_MULTIPLIER) / (COMMION_RATE_MULTIPLIER - commissionRate);
         uint256 fee = total - claimedAmount;
+
+        if (claimedAmount == rewards) {
+            total = user.pendingRewards;
+            fee = commissionFee;
+        }
 
         totalReleased += claimedAmount;
         user.pendingRewards = user.pendingRewards - total;

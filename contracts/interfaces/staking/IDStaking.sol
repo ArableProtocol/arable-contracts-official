@@ -30,4 +30,6 @@ interface IDStaking {
         address beneficiary,
         uint256 amount
     ) external;
+
+    function updatePoolDuration(uint256 _lockupDuration) external;
 }

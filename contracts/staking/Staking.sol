@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 import "../interfaces/staking/IStaking.sol";
 import "../interfaces/staking/IStakingRoot.sol";
@@ -14,7 +15,7 @@ import "../interfaces/staking/ITokenLocker.sol";
 /** @title Staking
  * @notice General staking contract for staking ACRE
  */
-contract Staking is Ownable, ReentrancyGuard, IStaking {
+contract Staking is Ownable, ReentrancyGuard, IStaking, Pausable {
     using SafeERC20 for IERC20;
 
     struct UserInfo {
@@ -45,6 +46,10 @@ contract Staking is Ownable, ReentrancyGuard, IStaking {
     event RequestWithdraw(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
     event TokenAddressSet(address token);
+    event PoolLockDurationChanged(uint256 lockupDuration);
+
+    event Pause();
+    event Unpause();
 
     constructor(IStakingRoot _root) {
         require(address(_root) != address(0), "Invalid StakingRoot");
@@ -124,7 +129,7 @@ contract Staking is Ownable, ReentrancyGuard, IStaking {
      *
      * @param amount: Amount of token to deposit
      */
-    function deposit(uint256 amount) external override {
+    function deposit(uint256 amount) external override whenNotPaused {
         require(amount > 0, "should deposit positive amount");
 
         _updatePool();
@@ -145,7 +150,7 @@ contract Staking is Ownable, ReentrancyGuard, IStaking {
      * @param amount: Amount of token to withdraw
      * @param _withdrawRewards: flag to withdraw reward or not
      */
-    function requestWithdraw(uint256 amount, bool _withdrawRewards) external override nonReentrant {
+    function requestWithdraw(uint256 amount, bool _withdrawRewards) external override nonReentrant whenNotPaused {
         require(amount > 0, "amount should be positive");
         _updatePool();
         _updateUserPendingRewards(msg.sender);
@@ -179,7 +184,7 @@ contract Staking is Ownable, ReentrancyGuard, IStaking {
      * @notice claim rewards from a certain pool
      *
      */
-    function claim() external override nonReentrant {
+    function claim() external override nonReentrant whenNotPaused {
         _updatePool();
         _updateUserPendingRewards(msg.sender);
 
@@ -228,10 +233,35 @@ contract Staking is Ownable, ReentrancyGuard, IStaking {
         emit TokenAddressSet(address(token));
 
         poolInfo.lockupDuration = 14 days;
+        emit PoolLockDurationChanged(poolInfo.lockupDuration);
+    }
+
+    function updatePoolDuration(uint256 _lockupDuration) external onlyOwner {
+        poolInfo.lockupDuration = _lockupDuration;
+
+        emit PoolLockDurationChanged(_lockupDuration);
     }
 
     // This function is called per epoch by bot
     function claimRewardsFromRoot() external {
         stakingRoot.claimRewards();
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 }

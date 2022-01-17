@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /** @title ArableVesting
  *
@@ -14,7 +15,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * Release tokens are sent to RootDistributer contract regularly by a bot
  *
  */
-contract ArableVesting is Ownable, ReentrancyGuard {
+contract ArableVesting is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     IERC20 public token; // ERC20 token address
@@ -31,6 +32,9 @@ contract ArableVesting is Ownable, ReentrancyGuard {
     uint256 public numerator;
 
     address public beneficiary;
+
+    event Pause();
+    event Unpause();
 
     modifier IsInitialized() {
         require(startTime != 0, "Not inititialized yet");
@@ -70,7 +74,7 @@ contract ArableVesting is Ownable, ReentrancyGuard {
     }
 
     // This function is called per epoch by bot
-    function release() external IsInitialized nonReentrant {
+    function release() external IsInitialized nonReentrant whenNotPaused {
         uint256 yearIndex = (block.timestamp - startTime) / ONE_YEAR;
         uint256 yearAmount = startAmount;
 
@@ -87,8 +91,7 @@ contract ArableVesting is Ownable, ReentrancyGuard {
         }
 
         // current year's release amount from beginning to now
-        uint256 currentYearAmount = (yearAmount * (block.timestamp - yearIndex * ONE_YEAR - startTime)) /
-            ONE_YEAR;
+        uint256 currentYearAmount = (yearAmount * (block.timestamp - yearIndex * ONE_YEAR - startTime)) / ONE_YEAR;
 
         // releasable = past_years_amount + current_year_amount - already_released
         uint256 releasableAmount = pastYearsAmount + currentYearAmount - totalReleased;
@@ -99,5 +102,23 @@ contract ArableVesting is Ownable, ReentrancyGuard {
 
     function withdrawAnyToken(IERC20 _token, uint256 amount) external onlyOwner {
         _token.safeTransfer(msg.sender, amount);
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 }

@@ -99,7 +99,7 @@ contract OTC is Ownable, ReentrancyGuard {
 
         require(user.acreAmount > 0, "Not agreed");
         require(user.fundedDate > 0 || user.usdtAmount == 0, "Not funded");
-        require(user.unlockDate >= block.timestamp, "Not unlocked yet");
+        require(user.unlockDate <= block.timestamp, "Not unlocked yet");
         require(!user.unlocked, "Already released");
 
         acre.safeTransfer(msg.sender, user.acreAmount);
