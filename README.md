@@ -1,5 +1,9 @@
 # arablecontracts
 
+## Contracts Structure
+
+![Structure](imgs/structure.jpg)
+
 ## Fuji Addresses
 
 - Treasury Address: 0x2e84741f27e2993D637f3a537191101ccBF67050
