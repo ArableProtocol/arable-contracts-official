@@ -1,8 +1,8 @@
 # arablecontracts
 
-## Contracts Structure
+## Contracts Architecture
 
-![Structure](imgs/structure.jpg)
+![Architecture](imgs/structure.jpg)
 
 ## Fuji Addresses
 
