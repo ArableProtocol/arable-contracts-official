@@ -9,6 +9,10 @@ interface IStakingRoot {
 
     function staking() external view returns (address);
 
+    function redelegationAttemptPeriod() external view returns (uint256);
+
+    function isRedelegationDisabled() external view returns (bool);
+
     function isDStaking(address) external view returns (bool);
 
     function isDStakingRemoved(address) external view returns (bool);
