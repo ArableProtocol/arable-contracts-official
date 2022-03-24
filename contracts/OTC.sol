@@ -23,13 +23,7 @@ contract OTC is Ownable, ReentrancyGuard {
     IERC20 public acre;
     mapping(address => UserInfo) public userInfo;
 
-    event DealAgreed(
-        address funder,
-        uint256 acreAmount,
-        uint256 usdtAmount,
-        uint256 expiry,
-        uint256 unlockDate
-    );
+    event DealAgreed(address funder, uint256 acreAmount, uint256 usdtAmount, uint256 expiry, uint256 unlockDate);
     event Funded(address funder, uint256 acreAmount, uint256 usdtAmount);
     event Released(address funder, uint256 acreAmount);
     event DealCancelled(address funder);
@@ -120,10 +114,7 @@ contract OTC is Ownable, ReentrancyGuard {
         fundToken.safeTransfer(msg.sender, balance);
     }
 
-    function withdrawAnyToken(IERC20 _token, uint256 _amount)
-        external
-        onlyOwner
-    {
+    function withdrawAnyToken(IERC20 _token, uint256 _amount) external onlyOwner {
         _token.safeTransfer(msg.sender, _amount);
     }
 }

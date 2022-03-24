@@ -48,6 +48,9 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
     uint256 public totalDistributed;
     uint256 public totalReleased;
 
+    bool public override isRedelegationDisabled;
+    uint256 public override redelegationAttemptPeriod;
+
     uint256 public stakingMultiplier; // reward multipler compared to delegated staking - default 0.5
     uint256 public constant BASE_MULTIPLIER = 1e2;
 
@@ -67,17 +70,14 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
         _;
     }
 
-    modifier onlyDStakingCreator(address dStaking, address addr) {
-        require(dStakingCreators[dStaking] == addr, "Not DStaking owner");
-        _;
-    }
-
     function initialize(IERC20 _token) external initializer {
         super.__ArableAccessControl_init_unchained();
 
         require(address(_token) != address(0), "Invalid token");
         token = _token;
         stakingMultiplier = 50;
+
+        redelegationAttemptPeriod = 1 weeks;
     }
 
     function getRemovedDStakingCount() external view returns (uint256) {
@@ -123,7 +123,9 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
         emit DStakingRegistered(msg.sender, dStakingAddr, commissionRate);
     }
 
-    function removeDStaking(address dStaking) external onlyDStakingCreator(dStaking, msg.sender) whenNotPaused {
+    function removeDStaking(address dStaking) external whenNotPaused {
+        require(dStakingCreators[dStaking] == msg.sender || owner() == msg.sender, "Not DStaking owner or admin");
+
         _distributeRewards();
 
         RewardsInfo memory info = getRewardsInfo(dStaking);
@@ -131,7 +133,7 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
 
         if (info.rewardsAmount > 0) {
             uint256 claimedAmount = safeTokenTransfer(dStaking, info.rewardsAmount);
-            emit DStakingRewardsClaimed(msg.sender, claimedAmount);
+            emit DStakingRewardsClaimed(dStaking, claimedAmount);
             totalReleased += claimedAmount;
         }
 
@@ -189,7 +191,7 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
         _distributeRewards();
     }
 
-    function claimRewards() external override onlyStakingOrDStaking(msg.sender) nonReentrant whenNotPaused {
+    function claimRewards() external override onlyStakingOrDStaking(msg.sender) whenNotPaused {
         if (msg.sender == staking) {
             // staking rewards claim
             uint256 rewards = stakingInfo.rewardsAmount;
@@ -280,6 +282,14 @@ contract StakingRoot is ArableAccessControl, IStakingRoot, PausableUpgradeable {
         for (uint256 index = 0; index < creators.length; index++) {
             isDStakingCreationAllowed[creators[index]] = allowed;
         }
+    }
+
+    function setRedelegationDisabled(bool disabled) external onlyOwner {
+        isRedelegationDisabled = disabled;
+    }
+
+    function setRedelegationAttemptPeriod(uint256 _redelegationAttemptPeriod) external onlyOwner {
+        redelegationAttemptPeriod = _redelegationAttemptPeriod;
     }
 
     /**

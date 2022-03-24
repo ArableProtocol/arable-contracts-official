@@ -29,6 +29,7 @@ contract DStaking is Ownable, IDStaking, ReentrancyGuard {
         uint256 amount; // amount of tokens delegated by the user
         uint256 rewardDebt; // amount to be cut off in rewards calculation - updated when deposit, withdraw or claim
         uint256 pendingRewards; // pending rewards for the user
+        uint256 lastRedelegation; // last timestamp that users claim
     }
 
     struct PoolInfo {
@@ -252,8 +253,18 @@ contract DStaking is Ownable, IDStaking, ReentrancyGuard {
         UserInfo storage user = userInfo[msg.sender];
         require(user.amount >= amount, "Redelegating more than you have!");
 
+        require(!stakingRoot.isRedelegationDisabled(), "Redelegation is disabled");
+        require(
+            user.lastRedelegation + stakingRoot.redelegationAttemptPeriod() <= block.timestamp,
+            "You can't redelegate now"
+        );
+
         user.amount -= amount;
         poolInfo.delegatedAmount -= amount;
+        user.lastRedelegation = block.timestamp;
+
+        user.rewardDebt = accumulativeRewards(user.amount, poolInfo.accTokenPerShare);
+
         IDStakingOverview(stakingRoot.dstakingOverview()).onUndelegate(msg.sender, amount);
 
         token.approve(toDStaking, amount);
