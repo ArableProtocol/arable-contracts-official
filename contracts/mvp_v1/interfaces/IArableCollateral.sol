@@ -9,6 +9,7 @@ interface IArableCollateral {
     function addSupportedCollateral(address token, uint allowedRate) external returns (bool);
     function removeSupportedCollateral(address token) external returns (bool);
     function changeAllowedRate(address token, uint newAllowedRate) external returns (bool);
+    function userRiskRate(address user) external view returns (uint256);
     function maxIssuableArUSD(address user) external view returns (uint);
     function currentDebt(address user) external view returns (uint);
     function calculateCollateralValue(address user) external view returns (uint);

@@ -3,8 +3,11 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+
 import "./ArableSynth.sol";
 import "./interfaces/IArableFarming.sol";
 import "./interfaces/IArableAddressRegistry.sol";
@@ -12,8 +15,13 @@ import "./interfaces/IArableOracle.sol";
 import "./interfaces/IArableManager.sol";
 
 // Oracle for price and reward info
-// TODO: for now, oracle is ownable for MVP v1 phase, should be converted to governance based one
-contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
+contract ArableOracle is
+    Initializable,
+    OwnableUpgradeable,
+    IArableOracle,
+    ReentrancyGuardUpgradeable,
+    PausableUpgradeable
+{
     address public addressRegistry;
 
     mapping(address => uint256) public price;
@@ -28,13 +36,20 @@ contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
     // events
     event SetTokenPrice(address token, uint256 price, uint256 timestamp);
     event SetRewardRate(uint256 farmId, address rewardToken, uint256 rate, uint256 timestamp);
+    event Pause();
+    event Unpause();
 
-    modifier onlyAllowedProvider {
-      require(isAllowedProvider[msg.sender], "Not an allowed oracle provider");
-      _;
+    modifier onlyAllowedProvider() {
+        require(isAllowedProvider[msg.sender], "Not an allowed oracle provider");
+        _;
     }
 
-    constructor(address addressRegistry_) {
+    function initialize(address addressRegistry_) external initializer {
+        __Context_init_unchained();
+        __Ownable_init_unchained();
+        __ReentrancyGuard_init();
+        __Pausable_init_unchained();
+
         addressRegistry = addressRegistry_;
         isAllowedProvider[msg.sender] = true;
     }
@@ -47,7 +62,7 @@ contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
         isAllowedProvider[provider_] = false;
     }
 
-    function registerPrice(address token_, uint256 price_) public onlyAllowedProvider {
+    function registerPrice(address token_, uint256 price_) public override onlyAllowedProvider whenNotPaused {
         require(token_ != address(0x0), "Token should not be zero address");
         uint256 oldPrice = price[token_];
         price[token_] = price_;
@@ -63,7 +78,7 @@ contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
         uint256 farmId_,
         address token_,
         uint256 dailyRewardRate_
-    ) public onlyAllowedProvider {
+    ) public override onlyAllowedProvider whenNotPaused {
         require(token_ != address(0x0), "Reward token should not be zero address");
         address farming = IArableAddressRegistry(addressRegistry).getArableFarming();
         IArableFarming farmingContract = IArableFarming(farming);
@@ -74,19 +89,24 @@ contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
         emit SetRewardRate(farmId_, token_, dailyRewardRate_, block.timestamp);
     }
 
-    function bulkPriceSet(address[] calldata tokens_, uint256[] calldata prices_) external onlyAllowedProvider {
+    function bulkPriceSet(address[] calldata tokens_, uint256[] calldata prices_)
+        external
+        onlyAllowedProvider
+        whenNotPaused
+    {
         require(tokens_.length == prices_.length, "Please check you input data.");
-        for(uint256 i=0; i < tokens_.length; i++) {
+        for (uint256 i = 0; i < tokens_.length; i++) {
             registerPrice(tokens_[i], prices_[i]);
         }
     }
 
     function bulkRegisterRewardRate(
-        uint256 farmId_, 
-        address[] calldata rewardTokens_, 
-        uint256[] calldata dailyRewardRates_) external onlyAllowedProvider {
+        uint256 farmId_,
+        address[] calldata rewardTokens_,
+        uint256[] calldata dailyRewardRates_
+    ) external onlyAllowedProvider whenNotPaused {
         require(rewardTokens_.length == dailyRewardRates_.length, "Please check you input data.");
-        for(uint256 i=0; i < rewardTokens_.length; i++) {
+        for (uint256 i = 0; i < rewardTokens_.length; i++) {
             registerRewardRate(farmId_, rewardTokens_[i], dailyRewardRates_[i]);
         }
     }
@@ -97,5 +117,23 @@ contract ArableOracle is Ownable, IArableOracle, ReentrancyGuard {
 
     function getDailyRewardRate(uint256 farmId, address token) external view override returns (uint256) {
         return dailyRewardRate[farmId][token];
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 }
