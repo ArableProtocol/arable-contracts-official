@@ -45,6 +45,7 @@
 - AirDrop: [0xF105165Faa7c1BF51BF1677dc410d1AE88b5d4ec](https://snowtrace.io/address/0xF105165Faa7c1BF51BF1677dc410d1AE88b5d4ec)
 - WAVAX-ACRE on Pangolin: [0x64694fc8dfca286bf1a15b0903fac98217dc3ad7](https://snowtrace.io/address/0x64694fc8dfca286bf1a15b0903fac98217dc3ad7)
 - USDT.e-ACRE on Pangolin: [0xb448a6772648da6d16ab0167484242e07abf644e](https://snowtrace.io/address/0xb448a6772648da6d16ab0167484242e07abf644e)
+- ACRE-MATIC on QuickSwap: [0x561ed3fbeac3c4e5b060024666f9a1cd2aec7847](https://polygonscan.com/address/0x561ed3fbeac3c4e5b060024666f9a1cd2aec7847)
 - AFT: [0xe76a54d67259970A6956ff7ae0Dd79B1B3655cb3](https://snowtrace.io/address/0xe76a54d67259970A6956ff7ae0Dd79B1B3655cb3)
 - Multicall: [0x4b1d7566f9b837df1a4a934d883e2cccd90d4a1a](https://snowtrace.io/address/0x4b1d7566f9b837df1a4a934d883e2cccd90d4a1a)
 
