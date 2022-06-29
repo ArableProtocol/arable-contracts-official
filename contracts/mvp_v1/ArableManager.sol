@@ -35,26 +35,27 @@ contract ArableManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgr
         __ReentrancyGuard_init();
         __Pausable_init_unchained();
 
+        require(addressRegistry_ != address(0), "Invalid addressRegistry_");
+
         addressRegistry = addressRegistry_;
     }
 
-    function registerSynth(string memory tokenName, string memory tokenSymbol) public onlyOwner {
-        // Note: farming and exchange contracts should be set before synths register
-        address farming = IArableAddressRegistry(addressRegistry).getArableFarming();
-        address exchange = IArableAddressRegistry(addressRegistry).getArableExchange();
-        address collateral = IArableAddressRegistry(addressRegistry).getArableCollateral();
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
 
-        require(synthIds[keccak256(abi.encodePacked(tokenSymbol))] == address(0), "synth is already registered");
-
-        ArableSynth synth = new ArableSynth(tokenName, tokenSymbol, owner(), farming, exchange, collateral);
-        synths.push(address(synth));
-        isSynth[address(synth)] = true;
-
-        //addition of synth ids, this is needed to call contract addresses
-        //from collateral & liquidation
-        synthIds[keccak256(abi.encodePacked(tokenSymbol))] = address(synth);
-
-        emit RegisterSynth(address(synth), tokenName, tokenSymbol);
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 
     function bulkRegisterSynths(string[] calldata tokenNames_, string[] calldata tokenSymbols_) external onlyOwner {
@@ -69,6 +70,13 @@ contract ArableManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgr
         isSynthDisabled[synthAddress] = isDisabled;
 
         // Note: disabled synths are not eligible for swap
+    }
+
+    function isEnabledSynth(address _token) external view returns (bool) {
+        if (!isSynth[_token] || isSynthDisabled[_token]) {
+            return false;
+        }
+        return true;
     }
 
     // TODO: this function is assuming that no more than 500 synths are registered
@@ -98,10 +106,6 @@ contract ArableManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgr
             }
         }
         return enabledSynths;
-    }
-
-    function getSynthAddress(string memory tokenSymbol) public view returns (address) {
-        return synthIds[keccak256(abi.encodePacked(tokenSymbol))];
     }
 
     /**
@@ -143,21 +147,26 @@ contract ArableManager is Initializable, OwnableUpgradeable, ReentrancyGuardUpgr
         }
     }
 
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
+    function registerSynth(string memory tokenName, string memory tokenSymbol) public onlyOwner {
+        // Note: farming and exchange contracts should be set before synths register
+        address farming = IArableAddressRegistry(addressRegistry).getArableFarming();
+        address exchange = IArableAddressRegistry(addressRegistry).getArableExchange();
+        address collateral = IArableAddressRegistry(addressRegistry).getArableCollateral();
+
+        require(synthIds[keccak256(abi.encodePacked(tokenSymbol))] == address(0), "synth is already registered");
+
+        ArableSynth synth = new ArableSynth(tokenName, tokenSymbol, owner(), farming, exchange, collateral);
+        synths.push(address(synth));
+        isSynth[address(synth)] = true;
+
+        //addition of synth ids, this is needed to call contract addresses
+        //from collateral & liquidation
+        synthIds[keccak256(abi.encodePacked(tokenSymbol))] = address(synth);
+
+        emit RegisterSynth(address(synth), tokenName, tokenSymbol);
     }
 
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
+    function getSynthAddress(string memory tokenSymbol) public view returns (address) {
+        return synthIds[keccak256(abi.encodePacked(tokenSymbol))];
     }
 }

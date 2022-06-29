@@ -14,7 +14,6 @@ import "./interfaces/IArableAddressRegistry.sol";
 import "./interfaces/IArableManager.sol";
 import "./interfaces/IArableCollateral.sol";
 import "./interfaces/IArableSynth.sol";
-import "hardhat/console.sol";
 
 contract ArableLiquidation is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradeable, PausableUpgradeable {
     using SafeERC20 for IERC20;
@@ -86,6 +85,24 @@ contract ArableLiquidation is Initializable, OwnableUpgradeable, ReentrancyGuard
         setLiquidationDelay(liquidationDelay_); // 1 day on testnet - 3 days for mainnet
     }
 
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
+    }
+
     function collateralContract() internal view returns (IArableCollateral) {
         return IArableCollateral(_addressRegistry.getArableCollateral());
     }
@@ -98,7 +115,16 @@ contract ArableLiquidation is Initializable, OwnableUpgradeable, ReentrancyGuard
         return _liquidationEntries[user];
     }
 
+    function removeFlagIfHealthy(address user) external whenNotPaused {
+        if (isFlaggable(user) == false && isFlagged(user) == true) {
+            _liquidationEntries[user]._liquidationDeadline = 0;
+            emit RemoveFlagForLiquidation(user, _liquidationEntries[user]._liquidationId);
+        }
+    }
+
     function setAddressRegistry(address newAddressRegistry) public onlyOwner {
+        require(newAddressRegistry != address(0), "Invalid address");
+
         _addressRegistry = IArableAddressRegistry(newAddressRegistry);
     }
 
@@ -179,13 +205,6 @@ contract ArableLiquidation is Initializable, OwnableUpgradeable, ReentrancyGuard
         return _liquidationCounter;
     }
 
-    function removeFlagIfHealthy(address user) external whenNotPaused {
-        if (isFlaggable(user) == false && isFlagged(user) == true) {
-            _liquidationEntries[user]._liquidationDeadline = 0;
-            emit RemoveFlagForLiquidation(user, _liquidationEntries[user]._liquidationId);
-        }
-    }
-
     /**
      * @notice function that actually liquidates the user
      *
@@ -257,23 +276,5 @@ contract ArableLiquidation is Initializable, OwnableUpgradeable, ReentrancyGuard
 
         // Go to collateral to liquidate the user
         collateralContract()._liquidateCollateral(user, beneficiary, liquidationAmount_);
-    }
-
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
-    }
-
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
     }
 }

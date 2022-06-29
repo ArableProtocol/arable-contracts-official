@@ -126,7 +126,9 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
      */
     modifier onlyDebtManager(address sender) {
         require(
-            sender == _addressRegistry.getArableManager() || sender == _addressRegistry.getArableFarming(),
+            sender == _addressRegistry.getArableManager() || 
+            sender == _addressRegistry.getArableFarming() || 
+            sender == _addressRegistry.getArableExchange(),
             "not authorized"
         );
         _;
@@ -141,8 +143,22 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         setAddressRegistry(addressRegistry);
     }
 
-    function setAddressRegistry(address newAddressRegistry) public onlyOwner {
-        _addressRegistry = IArableAddressRegistry(newAddressRegistry);
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 
     // ** EXTERNAL DEBT FUNCTIONS ** //
@@ -157,6 +173,141 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         _totalDebt -= amount;
         emit TotalDebtUpdate(_totalDebt, block.timestamp);
         return true;
+    }
+
+    // ** COLLATERAL OPERATIONS ** //
+
+    /**
+     * @notice allows deposit of collateral by user
+     *
+     * @param token contract address of the token
+     * @param amount amount of tokens to be deposited
+     *
+     * Emits a {CollateralDeposited} event.
+     *
+     * @return bool
+     *
+     * @dev amount in atomic units
+     */
+    function depositCollateral(address token, uint256 amount)
+        external
+        onlySupportedCollateral(token)
+        nonReentrant
+        returns (bool)
+    {
+        require(token != address(0), "Invalid token");
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        _addCollateral(msg.sender, token, amount);
+        IArableLiquidation liquidation = IArableLiquidation(_addressRegistry.getArableLiquidation());
+        liquidation.removeFlagIfHealthy(msg.sender);
+        return true;
+    }
+
+    /**
+     * @notice allows withdrawal of collateral by user
+     *
+     * @param token contract address of the token
+     * @param amount amount of tokens to be withdrawn
+     *
+     * Emits a {CollateralWithdrawn} event.
+     *
+     * @return bool
+     *
+     * @dev amount in atomic units
+     */
+    function withdrawCollateral(address token, uint256 amount)
+        external
+        onlySupportedCollateral(token)
+        whenNotPaused
+        nonReentrant
+        returns (bool)
+    {
+        // Checks if user has previously deposited the collateral
+        require(userCollateralBalance(msg.sender, token) >= amount, "Collateral: not enough tokens");
+
+        require(
+            maxWithdrawableTokenVal(msg.sender, token) >= calculateTokenValue(token, amount),
+            "Collateral: not enough collateral"
+        );
+
+        _removeCollateral(msg.sender, token, amount);
+        IERC20(token).safeTransfer(msg.sender, amount);
+        return true;
+    }
+
+    /**
+     * @notice external liquidation collateral that is called from liquidation
+     * contract only
+     *
+     * @dev be careful with accessControl `onlyAddress`
+     *
+     *
+     * @param user address of the user to be liquidated
+     * @param beneficiary address of the liquidator
+     * @param liqAmount amount to be liquidated in terms of collateral
+     *
+     * Emits a {Liquidate} event.
+     * Emits a {CollateralDeposited} event.
+     * Emits a {CollateralWithdrawn} event.
+     *
+     */
+
+    function _liquidateCollateral(
+        address user,
+        address beneficiary,
+        uint256 liqAmount
+    ) external onlyAddress("ARABLE_LIQUIDATION") nonReentrant {
+        // Get user balance
+        uint256 userBalance_ = calculateCollateralValue(user);
+        _removeDebtFromUser(user, currentDebt(user));
+        emit Liquidate(user, beneficiary, liqAmount, block.number);
+
+        // Calculate decimal collateralization rate
+        uint256 collateralizationRate_ = (liqAmount * 1 ether) / userBalance_;
+
+        // Check if collateral balance is bigger than liquidation amount
+        // require(collateralizationRate_ <= 1 ether, "Can NOT liquidate more than what user has");
+        // Note: this case happens when a user's debt * liquidationPenalty is bigger than collateral
+        // - but for good protocol maintenance, these positions should be removed
+
+        // Liquidate from all collaterals for proportional amounts
+        for (uint256 i = 0; i < _supportedCollaterals.length; i++) {
+            // Check if user has balance of that type of collateral
+            address collateral = _supportedCollaterals[i];
+            uint256 collateralBalance_ = userCollateralBalance(user, collateral);
+
+            if (collateralBalance_ > 0) {
+                // Calculate the proportional amount to be removed from user's collateral balance
+                uint256 toBeRemoved_ = (collateralBalance_ * collateralizationRate_) / 1 ether;
+                if (toBeRemoved_ > collateralBalance_) {
+                    toBeRemoved_ = collateralBalance_;
+                }
+
+                // Remove from the user + add it to beneficiary
+                _removeCollateral(user, _supportedCollaterals[i], toBeRemoved_);
+
+                // withdraw collateral token after liquidation
+                IERC20(collateral).safeTransfer(beneficiary, toBeRemoved_);
+            }
+        }
+    }
+
+    function getSupportedCollaterals() external view returns (address[] memory) {
+        return _supportedCollaterals;
+    }
+
+    function getSupportedCollateralsCount() external view returns (uint256) {
+        return _supportedCollaterals.length;
+    }
+
+    function getTotalDebt() external view returns (uint256) {
+        return _totalDebt;
+    }
+
+    function setAddressRegistry(address newAddressRegistry) public onlyOwner {
+        require(newAddressRegistry != address(0), "Invalid address");
+
+        _addressRegistry = IArableAddressRegistry(newAddressRegistry);
     }
 
     // ** EXTERNAL ASSET FUNCTIONS ** //
@@ -199,167 +350,6 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         );
         _collateralAssetData[token].allowedRate = newAllowedRate;
         return true;
-    }
-
-    // ** COLLATERAL OPERATIONS ** //
-
-    /**
-     * @notice allows deposit of collateral by user
-     *
-     * @param token contract address of the token
-     * @param amount amount of tokens to be deposited
-     *
-     * Emits a {CollateralDeposited} event.
-     *
-     * @return bool
-     *
-     * @dev amount in atomic units
-     */
-    function depositCollateral(address token, uint256 amount)
-        public
-        onlySupportedCollateral(token)
-        nonReentrant
-        returns (bool)
-    {
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        _addCollateral(msg.sender, token, amount);
-        IArableLiquidation liquidation = IArableLiquidation(_addressRegistry.getArableLiquidation());
-        liquidation.removeFlagIfHealthy(msg.sender);
-        return true;
-    }
-
-    /**
-     * @notice allows withdrawal of collateral by user
-     *
-     * @param token contract address of the token
-     * @param amount amount of tokens to be withdrawn
-     *
-     * Emits a {CollateralWithdrawn} event.
-     *
-     * @return bool
-     *
-     * @dev amount in atomic units
-     */
-    function withdrawCollateral(address token, uint256 amount)
-        public
-        onlySupportedCollateral(token)
-        whenNotPaused
-        nonReentrant
-        returns (bool)
-    {
-        // Checks if user has previously deposited the collateral
-        require(_userCollateralBalance(msg.sender, token) >= amount, "Collateral: not enough tokens");
-
-        require(
-            maxWithdrawableTokenVal(msg.sender, token) >= calculateTokenValue(token, amount),
-            "Collateral: not enough collateral"
-        );
-
-        _removeCollateral(msg.sender, token, amount);
-        IERC20(token).safeTransfer(msg.sender, amount);
-        return true;
-    }
-
-    /**
-     * @notice internal function to increment user's collateral amount
-     *
-     * @param user address of the user
-     * @param token address of the token contract
-     * @param amount amount of tokens
-     */
-    function _addCollateral(
-        address user,
-        address token,
-        uint256 amount
-    ) internal {
-        _individualCollateral[user][token] += amount;
-        emit CollateralDeposited(user, token, amount, block.number);
-    }
-
-    /**
-     * @notice internal function to decrement user's collateral amount
-     *
-     * @param user address of the user
-     * @param token address of the token contract
-     * @param amount amount of tokens
-     */
-    function _removeCollateral(
-        address user,
-        address token,
-        uint256 amount
-    ) internal {
-        require(_individualCollateral[user][token] >= amount, "user token collateral should be bigger than amount");
-        _individualCollateral[user][token] -= amount;
-        emit CollateralWithdrawn(user, token, amount, block.number);
-    }
-
-    /**
-     * @notice external liquidation collateral that is called from liquidation
-     * contract only
-     *
-     * @dev be careful with accessControl `onlyAddress`
-     *
-     *
-     * @param user address of the user to be liquidated
-     * @param beneficiary address of the liquidator
-     * @param liqAmount amount to be liquidated in terms of collateral
-     *
-     * Emits a {Liquidate} event.
-     * Emits a {CollateralDeposited} event.
-     * Emits a {CollateralWithdrawn} event.
-     *
-     */
-
-    function _liquidateCollateral(
-        address user,
-        address beneficiary,
-        uint256 liqAmount
-    ) external onlyAddress("ARABLE_LIQUIDATION") nonReentrant {
-        // Get user balance
-        uint256 userBalance_ = calculateCollateralValue(user);
-        _removeDebtFromUser(user, currentDebt(user));
-        emit Liquidate(user, beneficiary, liqAmount, block.number);
-
-        // Calculate decimal collateralization rate
-        uint256 collateralizationRate_ = (liqAmount * 1 ether) / userBalance_;
-
-        // Check if collateral balance is bigger than liquidation amount
-        // require(collateralizationRate_ <= 1 ether, "Can NOT liquidate more than what user has");
-        // Note: this case happens when a user's debt * liquidationPenalty is bigger than collateral
-        // - but for good protocol maintenance, these positions should be removed
-
-        // Liquidate from all collaterals for proportional amounts
-        for (uint256 i = 0; i < _supportedCollaterals.length; i++) {
-            // Check if user has balance of that type of collateral
-            address collateral = _supportedCollaterals[i];
-            uint256 collateralBalance_ = _userCollateralBalance(user, collateral);
-
-            if (collateralBalance_ > 0) {
-                // Calculate the proportional amount to be removed from user's collateral balance
-                uint256 toBeRemoved_ = (collateralBalance_ * collateralizationRate_) / 1 ether;
-                if (toBeRemoved_ > collateralBalance_) {
-                    toBeRemoved_ = collateralBalance_;
-                }
-
-                // Remove from the user + add it to beneficiary
-                _removeCollateral(user, _supportedCollaterals[i], toBeRemoved_);
-
-                // withdraw collateral token after liquidation
-                IERC20(collateral).safeTransfer(beneficiary, toBeRemoved_);
-            }
-        }
-    }
-
-    function getSupportedCollaterals() external view returns (address[] memory) {
-        return _supportedCollaterals;
-    }
-
-    function getSupportedCollateralsCount() external view returns (uint256) {
-        return _supportedCollaterals.length;
-    }
-
-    function getTotalDebt() external view returns (uint256) {
-        return _totalDebt;
     }
 
     /**
@@ -407,7 +397,7 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
 
         // Loop through all supported collaterals
         for (uint256 i = 0; i < _supportedCollaterals.length; i++) {
-            if (_userCollateralBalance(user, _supportedCollaterals[i]) > 0) {
+            if (userCollateralBalance(user, _supportedCollaterals[i]) > 0) {
                 uint256 allowedRate = _collateralAssetData[_supportedCollaterals[i]].allowedRate;
                 if (allowedRate > 0) {
                     uint256 collateralValue = _calculateSingleCollateralValue(user, _supportedCollaterals[i]);
@@ -443,7 +433,7 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
     function calculateCollateralValue(address user) public view returns (uint256) {
         uint256 calculatedValue_ = 0;
         for (uint256 i = 0; i < _supportedCollaterals.length; i++) {
-            if (_userCollateralBalance(user, _supportedCollaterals[i]) > 0) {
+            if (userCollateralBalance(user, _supportedCollaterals[i]) > 0) {
                 calculatedValue_ += _calculateSingleCollateralValue(user, _supportedCollaterals[i]);
             }
         }
@@ -458,28 +448,8 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
      *
      * @return uint amount of tokens collateralized
      */
-    function _userCollateralBalance(address user, address token) public view returns (uint256) {
+    function userCollateralBalance(address user, address token) public view returns (uint256) {
         return _individualCollateral[user][token];
-    }
-
-    /**
-     * @notice calculates single collateral value in USD
-     *
-     * @dev divide by (10**18) because of decimal calculation
-     *
-     * @param user address of the user
-     * @param token contract address of the token
-     *
-     * @return uint value in USD
-     */
-    function _calculateSingleCollateralValue(address user, address token) internal view returns (uint256) {
-        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
-        uint256 tokenPrice = oracle.getPrice(token);
-
-        // convert to normalized collateral balance with 18 decimals and return usd value
-        uint256 decimals = IERC20Extented(token).decimals();
-        uint256 normalizedCollateralBalance = (_userCollateralBalance(user, token) * 1 ether) / (10**decimals);
-        return (normalizedCollateralBalance * tokenPrice) / 1 ether;
     }
 
     function maxWithdrawableTokenVal(address user, address token) public view returns (uint256) {
@@ -497,18 +467,15 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         if (tokenPrice == 0) {
             return 0;
         }
-        uint256 userTokenDeposit = _userCollateralBalance(user, token);
-        uint256 maxWithdrawable = (maxWithdrawableTokenVal(user, token) * 1 ether) / tokenPrice;
+        uint256 userTokenDeposit = userCollateralBalance(user, token);
+
+        // maxWithdrawableTokenVal is returning withdrawable token value in decimal 18.
+        uint256 maxWithdrawable = (maxWithdrawableTokenVal(user, token) * 10**(IERC20Extented(token).decimals())) /
+            tokenPrice;
         if (userTokenDeposit < maxWithdrawable) {
             return userTokenDeposit;
         }
         return maxWithdrawable;
-    }
-
-    function calculateTokenValue(address token, uint256 amount) internal view returns (uint256) {
-        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
-        uint256 tokenPrice = oracle.getPrice(token);
-        return (amount * tokenPrice) / 1 ether;
     }
 
     // ** STAKE & MINT FUNCTIONS ** //
@@ -556,6 +523,93 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         return true;
     }
 
+    function removeTotalDebtByBurn(uint256 amount) external returns (bool) {
+        require(_totalDebt >= amount, "totalDebt should be bigger than amount");
+
+        // burn tokens from msg.sender
+        IArableSynth(IArableManager(_addressRegistry.getArableManager()).getSynthAddress(_arUSD)).burnFrom(
+            msg.sender,
+            amount
+        );
+
+        _totalDebt -= amount;
+        emit TotalDebtUpdate(_totalDebt, block.timestamp);
+        return true;
+    }
+
+    /**
+     * @notice view function to calculate debt factor with given amount
+     *
+     * @param amount amount of arUSD
+     *
+     * @return uint returns the debt factor
+     */
+    function calculateDebtFactor(uint256 amount) public view returns (uint256) {
+        if (_totalDebtFactor == 0 || _totalDebt == 0) {
+            return amount;
+        }
+        return (_totalDebtFactor * amount) / _totalDebt;
+    }
+
+    /**
+     * @notice internal function to increment user's collateral amount
+     *
+     * @param user address of the user
+     * @param token address of the token contract
+     * @param amount amount of tokens
+     */
+    function _addCollateral(
+        address user,
+        address token,
+        uint256 amount
+    ) internal {
+        _individualCollateral[user][token] += amount;
+        emit CollateralDeposited(user, token, amount, block.number);
+    }
+
+    /**
+     * @notice internal function to decrement user's collateral amount
+     *
+     * @param user address of the user
+     * @param token address of the token contract
+     * @param amount amount of tokens
+     */
+    function _removeCollateral(
+        address user,
+        address token,
+        uint256 amount
+    ) internal {
+        require(_individualCollateral[user][token] >= amount, "user token collateral should be bigger than amount");
+        _individualCollateral[user][token] -= amount;
+        emit CollateralWithdrawn(user, token, amount, block.number);
+    }
+
+    /**
+     * @notice calculates single collateral value in USD
+     *
+     * @dev divide by (10**18) because of decimal calculation
+     *
+     * @param user address of the user
+     * @param token contract address of the token
+     *
+     * @return uint value in USD
+     */
+    function _calculateSingleCollateralValue(address user, address token) internal view returns (uint256) {
+        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
+        uint256 tokenPrice = oracle.getPrice(token);
+
+        // convert to normalized collateral balance with 18 decimals and return usd value
+        uint256 decimals = IERC20Extented(token).decimals();
+        uint256 normalizedCollateralBalance = (userCollateralBalance(user, token) * 1 ether) / (10**decimals);
+        return (normalizedCollateralBalance * tokenPrice) / 1 ether;
+    }
+
+    function calculateTokenValue(address token, uint256 amount) internal view returns (uint256) {
+        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
+        uint256 tokenPrice = oracle.getPrice(token);
+        return (amount * tokenPrice) / 10**(IERC20Extented(token).decimals());
+    }
+
     /**
      * @notice internal function to increment user's and total debt
      *
@@ -590,20 +644,6 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
     }
 
     /**
-     * @notice view function to calculate debt factor with given amount
-     *
-     * @param amount amount of arUSD
-     *
-     * @return uint returns the debt factor
-     */
-    function calculateDebtFactor(uint256 amount) public view returns (uint256) {
-        if (_totalDebtFactor == 0 || _totalDebt == 0) {
-            return amount;
-        }
-        return (_totalDebtFactor * amount) / _totalDebt;
-    }
-
-    /**
      * @notice internal function to increment debt rate
      *
      * @param user address of the user
@@ -625,23 +665,5 @@ contract ArableCollateral is Initializable, OwnableUpgradeable, ReentrancyGuardU
         _debtFactor[user] -= amount;
         _totalDebtFactor -= amount;
         emit UserDebtFactorDecrease(user, amount, block.number);
-    }
-
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
-    }
-
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
     }
 }

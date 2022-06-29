@@ -11,5 +11,5 @@ interface IArableSynth is IERC20 {
 
     function burnFrom(address account, uint256 amount) external;
 
-    function safeMint(address toAddress, uint256 amount) external;
+    function safeMint(address toAddress, uint256 amount) external returns (uint256);
 }

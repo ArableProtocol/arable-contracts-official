@@ -2,6 +2,7 @@
 
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -22,6 +23,8 @@ contract ArableFarming is
     ReentrancyGuardUpgradeable,
     PausableUpgradeable
 {
+    using SafeERC20 for IERC20;
+
     address public addressRegistry;
     uint256 public epochZeroTime;
     uint256 public epochDuration;
@@ -35,6 +38,7 @@ contract ArableFarming is
     mapping(uint256 => mapping(address => uint256)) public lastRewardRateSumEpoch;
 
     address[] public stakingTokens;
+    mapping(address => bool) public isStakingToken;
     mapping(uint256 => bool) public isDisabledFarm;
 
     // staking amount by farm and address
@@ -69,19 +73,30 @@ contract ArableFarming is
         __ReentrancyGuard_init();
         __Pausable_init_unchained();
 
+        require(addressRegistry_ != address(0), "Invalid addressRegistry_");
+
         addressRegistry = addressRegistry_;
         epochZeroTime = block.timestamp;
 
         epochDuration = epochDuration_;
     }
 
-    // create a new farm
-    function registerFarm(address stakingToken) public override onlyOwner returns (uint256 farmId) {
-        require(stakingToken != address(0x0), "stakingToken should be set");
-        stakingTokens.push(stakingToken);
-        farmId = stakingTokens.length - 1;
-        emit RegisterStakingPool(farmId, stakingToken);
-        return farmId;
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 
     function getStakingTokens() external view returns (address[] memory) {
@@ -90,27 +105,6 @@ contract ArableFarming is
 
     function getStakingTokensCount() external view returns (uint256) {
         return stakingTokens.length;
-    }
-
-    function setRewardTokens(uint256 farmId, address[] memory _rewardTokens)
-        public
-        override
-        onlyOwner
-        onlyValidFarmId(farmId)
-    {
-        deleteRewardTokens(farmId);
-        uint256 curEpoch = currentEpoch();
-        farmStartEpoch[farmId] = curEpoch;
-        for (uint256 i = 0; i < _rewardTokens.length; i++) {
-            address rewardToken = _rewardTokens[i];
-            rewardTokens[farmId][i] = rewardToken;
-            _isRewardToken[farmId][rewardToken] = true;
-            uint256 lastEpoch = lastRewardRateSumEpoch[farmId][rewardToken];
-            uint256 lastEpochRewardSum = rewardRateSum[farmId][rewardToken][lastEpoch];
-            lastRewardRateSumEpoch[farmId][rewardToken] = curEpoch;
-            rewardRateSum[farmId][rewardToken][curEpoch] = lastEpochRewardSum;
-        }
-        rewardTokenLengths[farmId] = _rewardTokens.length;
     }
 
     function bulkRegisterFarm(address[] calldata farmToken_) external onlyOwner {
@@ -124,10 +118,6 @@ contract ArableFarming is
         for (uint256 i = 0; i < farmIds.length; i++) {
             setRewardTokens(farmIds[i], rewardTokens_[i]);
         }
-    }
-
-    function currentEpoch() public view override returns (uint256) {
-        return (block.timestamp - epochZeroTime) / epochDuration;
     }
 
     // run by bot or anyone per epoch
@@ -161,32 +151,8 @@ contract ArableFarming is
         }
     }
 
-    function deleteRewardTokens(uint256 farmId) public override onlyOwner onlyValidFarmId(farmId) {
-        for (uint256 i = 0; i < rewardTokenLengths[farmId]; i++) {
-            _isRewardToken[farmId][rewardTokens[farmId][i]] = false;
-        }
-        rewardTokenLengths[farmId] = 0;
-    }
-
     function setIsDisabledFarm(uint256 farmId, bool isDisabled) external override onlyOwner onlyValidFarmId(farmId) {
         isDisabledFarm[farmId] = isDisabled;
-    }
-
-    function payFeesFor(
-        address asset_,
-        uint256 amount_,
-        address account_,
-        ArableFees.Model model_
-    ) internal returns (uint256) {
-        // collect fees for farm enter fee
-        address feeCollectorAddress = IArableAddressRegistry(addressRegistry).getArableFeeCollector();
-        IArableFeeCollector arableCollector = IArableFeeCollector(feeCollectorAddress);
-
-        uint256 fees = arableCollector.calculateFees(asset_, amount_, account_, model_);
-        IERC20(asset_).approve(feeCollectorAddress, fees);
-        arableCollector.payFeesFor(asset_, amount_, account_, model_);
-
-        return fees;
     }
 
     function stake(uint256 farmId, uint256 amount)
@@ -205,10 +171,9 @@ contract ArableFarming is
         _claimAllRewards(farmId);
 
         // collect farm enter fee
-        address stakingToken = stakingTokens[farmId];
-        uint256 fees = payFeesFor(stakingToken, amount, msg.sender, ArableFees.Model.SETUP_FARM);
+        IERC20(stakingTokens[farmId]).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 fees = payFeesFor(stakingTokens[farmId], amount, msg.sender, ArableFees.Model.SETUP_FARM);
 
-        IERC20(stakingTokens[farmId]).transferFrom(msg.sender, address(this), amount);
         stakingAmount[farmId][msg.sender] += amount - fees;
 
         // register usedFarmingPools
@@ -239,9 +204,64 @@ contract ArableFarming is
 
         // TODO: we might need to add unstake notice period
         stakingAmount[farmId][msg.sender] -= amount;
-        IERC20(stakingToken).transfer(msg.sender, amount - fees);
+        IERC20(stakingToken).safeTransfer(msg.sender, amount - fees);
 
         emit Withdraw(farmId, stakingToken, amount, fees);
+    }
+
+    function getRewardTokens(uint256 farmId) external view override returns (address[] memory) {
+        address[] memory tokens = new address[](rewardTokenLengths[farmId]);
+        for (uint256 i = 0; i < rewardTokenLengths[farmId]; i++) {
+            tokens[i] = rewardTokens[farmId][i];
+        }
+        return tokens;
+    }
+
+    function isRewardToken(uint256 farmId, address rewardToken) external view override returns (bool) {
+        return _isRewardToken[farmId][rewardToken];
+    }
+
+    // create a new farm
+    function registerFarm(address stakingToken) public override onlyOwner returns (uint256 farmId) {
+        require(stakingToken != address(0x0), "stakingToken should be set");
+        require(!isStakingToken[stakingToken], "stakingToken already registered");
+        stakingTokens.push(stakingToken);
+        isStakingToken[stakingToken] = true;
+        farmId = stakingTokens.length - 1;
+        emit RegisterStakingPool(farmId, stakingToken);
+        return farmId;
+    }
+
+    function setRewardTokens(uint256 farmId, address[] memory _rewardTokens)
+        public
+        override
+        onlyOwner
+        onlyValidFarmId(farmId)
+    {
+        deleteRewardTokens(farmId);
+        uint256 curEpoch = currentEpoch();
+        farmStartEpoch[farmId] = curEpoch;
+        for (uint256 i = 0; i < _rewardTokens.length; i++) {
+            address rewardToken = _rewardTokens[i];
+            rewardTokens[farmId][i] = rewardToken;
+            _isRewardToken[farmId][rewardToken] = true;
+            uint256 lastEpoch = lastRewardRateSumEpoch[farmId][rewardToken];
+            uint256 lastEpochRewardSum = rewardRateSum[farmId][rewardToken][lastEpoch];
+            lastRewardRateSumEpoch[farmId][rewardToken] = curEpoch;
+            rewardRateSum[farmId][rewardToken][curEpoch] = lastEpochRewardSum;
+        }
+        rewardTokenLengths[farmId] = _rewardTokens.length;
+    }
+
+    function currentEpoch() public view override returns (uint256) {
+        return (block.timestamp - epochZeroTime) / epochDuration;
+    }
+
+    function deleteRewardTokens(uint256 farmId) public override onlyOwner onlyValidFarmId(farmId) {
+        for (uint256 i = 0; i < rewardTokenLengths[farmId]; i++) {
+            _isRewardToken[farmId][rewardTokens[farmId][i]] = false;
+        }
+        rewardTokenLengths[farmId] = 0;
     }
 
     function claimAllRewards(uint256 farmId) public override nonReentrant whenNotPaused {
@@ -252,37 +272,6 @@ contract ArableFarming is
 
     function claimReward(uint256 farmId, address rewardToken) public override nonReentrant whenNotPaused {
         _claimReward(farmId, rewardToken);
-    }
-
-    function _claimAllRewards(uint256 farmId) internal onlyValidFarmId(farmId) {
-        for (uint256 i = 0; i < rewardTokenLengths[farmId]; i++) {
-            _claimReward(farmId, rewardTokens[farmId][i]);
-        }
-    }
-
-    function _claimReward(uint256 farmId, address rewardToken) internal onlyValidFarmId(farmId) {
-        require(!isDisabledFarm[farmId], "the operation is not allowed on disabled farm");
-
-        uint256 latestClaimableEpoch = lastRewardRateSumEpoch[farmId][rewardToken];
-        uint256 claimAmount = estimatedReward(farmId, rewardToken, msg.sender);
-
-        lastClaimEpoch[farmId][rewardToken][msg.sender] = latestClaimableEpoch;
-        IArableSynth(rewardToken).safeMint(msg.sender, claimAmount);
-
-        // update totalDebt for reward claim event
-        IArableAddressRegistry _addressRegistry = IArableAddressRegistry(addressRegistry);
-        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
-        IArableCollateral collateral = IArableCollateral(_addressRegistry.getArableCollateral());
-        uint256 tokenPrice = oracle.getPrice(rewardToken);
-        if (tokenPrice > 0) {
-            collateral.addToDebt((claimAmount * tokenPrice) / 1 ether);
-        }
-
-        emit Claim(farmId, rewardToken, claimAmount);
-
-        // TODO: handle the case someone mint after pretty long time which could make big system debt changes
-        // - Possibly set maximum amount of tokens to be able to claim for specific token
-        // - Too big rewards for long time stake should be cut
     }
 
     function estimatedReward(
@@ -302,33 +291,51 @@ contract ArableFarming is
         return claimAmount;
     }
 
-    function getRewardTokens(uint256 farmId) external view override returns (address[] memory) {
-        address[] memory tokens = new address[](rewardTokenLengths[farmId]);
+    function _claimAllRewards(uint256 farmId) internal onlyValidFarmId(farmId) {
         for (uint256 i = 0; i < rewardTokenLengths[farmId]; i++) {
-            tokens[i] = rewardTokens[farmId][i];
+            _claimReward(farmId, rewardTokens[farmId][i]);
         }
-        return tokens;
     }
 
-    function isRewardToken(uint256 farmId, address rewardToken) external view override returns (bool) {
-        return _isRewardToken[farmId][rewardToken];
+    function payFeesFor(
+        address asset_,
+        uint256 amount_,
+        address account_,
+        ArableFees.Model model_
+    ) internal returns (uint256) {
+        // collect fees for farm enter fee
+        address feeCollectorAddress = IArableAddressRegistry(addressRegistry).getArableFeeCollector();
+        IArableFeeCollector arableCollector = IArableFeeCollector(feeCollectorAddress);
+
+        uint256 fees = arableCollector.calculateFees(asset_, amount_, account_, model_);
+        IERC20(asset_).safeApprove(feeCollectorAddress, fees);
+        arableCollector.payFeesFor(asset_, amount_, account_, model_);
+
+        return fees;
     }
 
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
-    }
+    function _claimReward(uint256 farmId, address rewardToken) internal onlyValidFarmId(farmId) {
+        require(!isDisabledFarm[farmId], "the operation is not allowed on disabled farm");
 
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
+        uint256 latestClaimableEpoch = lastRewardRateSumEpoch[farmId][rewardToken];
+        uint256 claimAmount = estimatedReward(farmId, rewardToken, msg.sender);
+
+        lastClaimEpoch[farmId][rewardToken][msg.sender] = latestClaimableEpoch;
+        uint256 claimedAmount = IArableSynth(rewardToken).safeMint(msg.sender, claimAmount);
+
+        // update totalDebt for reward claim event
+        IArableAddressRegistry _addressRegistry = IArableAddressRegistry(addressRegistry);
+        IArableOracle oracle = IArableOracle(_addressRegistry.getArableOracle());
+        IArableCollateral collateral = IArableCollateral(_addressRegistry.getArableCollateral());
+        uint256 tokenPrice = oracle.getPrice(rewardToken);
+        if (tokenPrice > 0) {
+            collateral.addToDebt((claimedAmount * tokenPrice) / 1 ether);
+        }
+
+        emit Claim(farmId, rewardToken, claimedAmount);
+
+        // TODO: handle the case someone mint after pretty long time which could make big system debt changes
+        // - Possibly set maximum amount of tokens to be able to claim for specific token
+        // - Too big rewards for long time stake should be cut
     }
 }

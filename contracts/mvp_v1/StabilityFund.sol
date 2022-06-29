@@ -9,8 +9,6 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
-import "hardhat/console.sol";
-
 interface IFlashLoanReceiver {
     function executeOperation(uint256 amount, bytes calldata _params) external;
 }
@@ -56,62 +54,6 @@ contract StabilityFund is Ownable, ERC20, ReentrancyGuard, Pausable {
 
     function getStableTokensCount() external view returns (uint256) {
         return stableTokens.length;
-    }
-
-    function getFundInfo()
-        public
-        view
-        returns (
-            IERC20[] memory,
-            uint256[] memory,
-            uint256
-        )
-    {
-        uint256[] memory balances = new uint256[](stableTokens.length);
-        for (uint256 index = 0; index < stableTokens.length; index++) {
-            balances[index] = stableTokens[index].balanceOf(address(this));
-        }
-
-        return (stableTokens, balances, totalSupply());
-    }
-
-    /**
-     * @notice get usd amount of all tokens on the contract
-     */
-    function getTotalAmount() public view returns (uint256) {
-        uint256 total;
-
-        for (uint256 index = 0; index < stableTokens.length; index++) {
-            IERC20 token = stableTokens[index];
-            total +=
-                token.balanceOf(address(this)) *
-                10**(DEFAULT_DECIMALS - IERC20Metadata(address(token)).decimals());
-        }
-
-        return total;
-    }
-
-    /**
-     * @notice get ratio between usd and lpSupply
-     */
-    function getRatio()
-        public
-        view
-        returns (
-            uint256 usd,
-            uint256 lpSupply,
-            uint256 ratio
-        )
-    {
-        usd = getTotalAmount();
-        lpSupply = totalSupply();
-        ratio = (usd * MULTIPLIER) / lpSupply;
-    }
-
-    function getUsdOfLp(uint256 lpAmount) public view returns (uint256) {
-        (uint256 usd, uint256 lpSupply, ) = getRatio();
-
-        return (lpAmount * usd) / lpSupply;
     }
 
     /**
@@ -172,7 +114,7 @@ contract StabilityFund is Ownable, ERC20, ReentrancyGuard, Pausable {
         isFlashAllowed[addr] = allowed;
     }
 
-    function deposit(IERC20 token, uint256 amount) external whenNotPaused {
+    function deposit(IERC20 token, uint256 amount) external whenNotPaused nonReentrant {
         require(isStableToken[token], "Not stable token");
         require(!isTokenDisabled[token], "Deposit is disabled");
 
@@ -187,40 +129,16 @@ contract StabilityFund is Ownable, ERC20, ReentrancyGuard, Pausable {
 
     /**
      */
-    function withdraw(uint256 amount) external whenNotPaused {
+    function withdraw(uint256 amount) external whenNotPaused nonReentrant {
         require(amount <= balanceOf(msg.sender), "Insufficient balance");
 
         _withdraw(amount);
     }
 
-    function withdrawAll() external whenNotPaused {
+    function withdrawAll() external whenNotPaused nonReentrant {
         uint256 amount = balanceOf(msg.sender);
 
         _withdraw(amount);
-    }
-
-    function _withdraw(uint256 amount) private {
-        (uint256 totalUsd, uint256 totalLP, ) = getRatio();
-
-        console.log("total usd: %s - totalLP: %s", totalUsd, totalLP);
-
-        for (uint256 index = 0; index < stableTokens.length; index++) {
-            IERC20 token = stableTokens[index];
-
-            uint256 tAmount = (token.balanceOf(address(this)) * amount) / totalLP;
-
-            console.log("%s -  - %s", address(token), tAmount);
-
-            if (amount > 0) {
-                token.safeTransfer(msg.sender, tAmount);
-
-                emit WithdrawToken(msg.sender, token, tAmount);
-            }
-        }
-
-        _burn(msg.sender, amount);
-
-        emit Withdraw(msg.sender, amount);
     }
 
     function swap(
@@ -302,5 +220,81 @@ contract StabilityFund is Ownable, ERC20, ReentrancyGuard, Pausable {
     function unpause() external onlyOwner whenPaused {
         _unpause();
         emit Unpause();
+    }
+
+    function getFundInfo()
+        public
+        view
+        returns (
+            IERC20[] memory,
+            uint256[] memory,
+            uint256
+        )
+    {
+        uint256[] memory balances = new uint256[](stableTokens.length);
+        for (uint256 index = 0; index < stableTokens.length; index++) {
+            balances[index] = stableTokens[index].balanceOf(address(this));
+        }
+
+        return (stableTokens, balances, totalSupply());
+    }
+
+    /**
+     * @notice get usd amount of all tokens on the contract
+     */
+    function getTotalAmount() public view returns (uint256) {
+        uint256 total;
+
+        for (uint256 index = 0; index < stableTokens.length; index++) {
+            IERC20 token = stableTokens[index];
+            total +=
+                token.balanceOf(address(this)) *
+                10**(DEFAULT_DECIMALS - IERC20Metadata(address(token)).decimals());
+        }
+
+        return total;
+    }
+
+    /**
+     * @notice get ratio between usd and lpSupply
+     */
+    function getRatio()
+        public
+        view
+        returns (
+            uint256 usd,
+            uint256 lpSupply,
+            uint256 ratio
+        )
+    {
+        usd = getTotalAmount();
+        lpSupply = totalSupply();
+        ratio = (usd * MULTIPLIER) / lpSupply;
+    }
+
+    function getUsdOfLp(uint256 lpAmount) public view returns (uint256) {
+        (uint256 usd, uint256 lpSupply, ) = getRatio();
+
+        return (lpAmount * usd) / lpSupply;
+    }
+
+    function _withdraw(uint256 amount) private {
+        (uint256 totalUsd, uint256 totalLP, ) = getRatio();
+
+        for (uint256 index = 0; index < stableTokens.length; index++) {
+            IERC20 token = stableTokens[index];
+
+            uint256 tAmount = (token.balanceOf(address(this)) * amount) / totalLP;
+
+            if (amount > 0) {
+                token.safeTransfer(msg.sender, tAmount);
+
+                emit WithdrawToken(msg.sender, token, tAmount);
+            }
+        }
+
+        _burn(msg.sender, amount);
+
+        emit Withdraw(msg.sender, amount);
     }
 }

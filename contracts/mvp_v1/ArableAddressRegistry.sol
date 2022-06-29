@@ -42,14 +42,6 @@ contract ArableAddressRegistry is Initializable, OwnableUpgradeable, IArableAddr
         _addresses[ARABLE_FEE_COLLECTOR] = arableFeeCollector_;
     }
 
-    /**
-     * @dev Returns an address by id
-     * @return The address
-     */
-    function getAddress(bytes32 id) public view override returns (address) {
-        return _addresses[id];
-    }
-
     function setAddress(bytes32 id, address address_) external override onlyOwner {
         _addresses[id] = address_;
     }
@@ -108,5 +100,13 @@ contract ArableAddressRegistry is Initializable, OwnableUpgradeable, IArableAddr
 
     function getArableFeeCollector() external view override returns (address) {
         return getAddress(ARABLE_FEE_COLLECTOR);
+    }
+
+    /**
+     * @dev Returns an address by id
+     * @return The address
+     */
+    function getAddress(bytes32 id) public view override returns (address) {
+        return _addresses[id];
     }
 }

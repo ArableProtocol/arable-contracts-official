@@ -50,8 +50,28 @@ contract ArableOracle is
         __ReentrancyGuard_init();
         __Pausable_init_unchained();
 
+        require(addressRegistry_ != address(0), "Invalid addressRegistry_");
+
         addressRegistry = addressRegistry_;
         isAllowedProvider[msg.sender] = true;
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 
     function setAllowedProvider(address provider_) external onlyOwner {
@@ -60,6 +80,25 @@ contract ArableOracle is
 
     function unsetAllowedProvider(address provider_) external onlyOwner {
         isAllowedProvider[provider_] = false;
+    }
+
+    function bulkRegisterRewardRate(
+        uint256 farmId_,
+        address[] calldata rewardTokens_,
+        uint256[] calldata dailyRewardRates_
+    ) external onlyAllowedProvider whenNotPaused {
+        require(rewardTokens_.length == dailyRewardRates_.length, "Please check you input data.");
+        for (uint256 i = 0; i < rewardTokens_.length; i++) {
+            registerRewardRate(farmId_, rewardTokens_[i], dailyRewardRates_[i]);
+        }
+    }
+
+    function getPrice(address token) external view override returns (uint256) {
+        return price[token];
+    }
+
+    function getDailyRewardRate(uint256 farmId, address token) external view override returns (uint256) {
+        return dailyRewardRate[farmId][token];
     }
 
     function registerPrice(address token_, uint256 price_) public override onlyAllowedProvider whenNotPaused {
@@ -98,42 +137,5 @@ contract ArableOracle is
         for (uint256 i = 0; i < tokens_.length; i++) {
             registerPrice(tokens_[i], prices_[i]);
         }
-    }
-
-    function bulkRegisterRewardRate(
-        uint256 farmId_,
-        address[] calldata rewardTokens_,
-        uint256[] calldata dailyRewardRates_
-    ) external onlyAllowedProvider whenNotPaused {
-        require(rewardTokens_.length == dailyRewardRates_.length, "Please check you input data.");
-        for (uint256 i = 0; i < rewardTokens_.length; i++) {
-            registerRewardRate(farmId_, rewardTokens_[i], dailyRewardRates_[i]);
-        }
-    }
-
-    function getPrice(address token) external view override returns (uint256) {
-        return price[token];
-    }
-
-    function getDailyRewardRate(uint256 farmId, address token) external view override returns (uint256) {
-        return dailyRewardRate[farmId][token];
-    }
-
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
-    }
-
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
     }
 }

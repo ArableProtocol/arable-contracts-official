@@ -38,38 +38,6 @@ contract ArableSynth is ERC20, AccessControl, ReentrancyGuard, Pausable {
         // could be changed?
     }
 
-    function setTotalSupplyLimit(uint256 _limit) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        totalSupplyLimit = _limit;
-    }
-
-    function mint(address toAddress, uint256 amount) public onlyRole(MINTER_ROLE) whenNotPaused {
-        require(totalSupply() + amount <= totalSupplyLimit, "Supply Limitation is reached");
-        _mint(toAddress, amount);
-    }
-
-    function safeMint(address toAddress, uint256 amount) public onlyRole(MINTER_ROLE) whenNotPaused {
-        uint256 remaining = totalSupplyLimit - totalSupply();
-
-        if (remaining > amount) {
-            _mint(toAddress, amount);
-        } else {
-            _mint(toAddress, remaining);
-        }
-    }
-
-    function burn(uint256 amount) public whenNotPaused {
-        _burn(msg.sender, amount);
-    }
-
-    function burnFrom(address account, uint256 amount) public whenNotPaused {
-        uint256 currentAllowance = allowance(account, _msgSender());
-        require(currentAllowance >= amount, "ERC20: burn amount exceeds allowance");
-        unchecked {
-            _approve(account, _msgSender(), currentAllowance - amount);
-        }
-        _burn(account, amount);
-    }
-
     /**
      * @notice Triggers stopped state
      * @dev Only possible when contract not paused.
@@ -86,5 +54,39 @@ contract ArableSynth is ERC20, AccessControl, ReentrancyGuard, Pausable {
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) whenPaused {
         _unpause();
         emit Unpause();
+    }
+
+    function setTotalSupplyLimit(uint256 _limit) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        totalSupplyLimit = _limit;
+    }
+
+    function mint(address toAddress, uint256 amount) public onlyRole(MINTER_ROLE) whenNotPaused {
+        require(totalSupply() + amount <= totalSupplyLimit, "Supply Limitation is reached");
+        _mint(toAddress, amount);
+    }
+
+    function safeMint(address toAddress, uint256 amount) public onlyRole(MINTER_ROLE) whenNotPaused returns (uint256) {
+        uint256 remaining = totalSupplyLimit - totalSupply();
+
+        if (remaining > amount) {
+            _mint(toAddress, amount);
+            return amount;
+        } else {
+            _mint(toAddress, remaining);
+            return remaining;
+        }
+    }
+
+    function burn(uint256 amount) public whenNotPaused {
+        _burn(msg.sender, amount);
+    }
+
+    function burnFrom(address account, uint256 amount) public whenNotPaused {
+        uint256 currentAllowance = allowance(account, _msgSender());
+        require(currentAllowance >= amount, "ERC20: burn amount exceeds allowance");
+        unchecked {
+            _approve(account, _msgSender(), currentAllowance - amount);
+        }
+        _burn(account, amount);
     }
 }

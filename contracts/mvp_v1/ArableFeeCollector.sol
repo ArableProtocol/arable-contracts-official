@@ -18,8 +18,6 @@ import "./interfaces/IArableExchange.sol";
 
 import "./libs/ArableFees.sol";
 
-import "hardhat/console.sol";
-
 /**
  * @author Ian Decentralize
  */
@@ -105,6 +103,8 @@ contract ArableFeeCollector is
         __ReentrancyGuard_init();
         __Pausable_init_unchained();
 
+        require(addressRegistry_ != address(0), "Invalid addressRegistry_");
+
         addressRegistry = addressRegistry_;
         // setting a default fee model
         feesPerAssetModel[address(0)][ArableFees.Model.DEFAULT] = defaultFees_;
@@ -115,6 +115,24 @@ contract ArableFeeCollector is
         epochNumber = 1;
         epochDuration = epochDuration_;
         epochNumber = 0;
+    }
+
+    /**
+     * @notice Triggers stopped state
+     * @dev Only possible when contract not paused.
+     */
+    function pause() external onlyOwner whenNotPaused {
+        _pause();
+        emit Pause();
+    }
+
+    /**
+     * @notice Returns to normal state
+     * @dev Only possible when contract is paused.
+     */
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+        emit Unpause();
     }
 
     /**
@@ -202,6 +220,79 @@ contract ArableFeeCollector is
         return collectorReceipt;
     }
 
+    function setAllowedProvider(address provider_) external onlyOwner {
+        require(provider_ != address(0), "Invalid provider_");
+
+        isAllowedProvider[provider_] = true;
+    }
+
+    function unsetAllowedProvider(address provider_) external onlyOwner {
+        require(provider_ != address(0), "Invalid provider_");
+
+        isAllowedProvider[provider_] = false;
+    }
+
+    function setAllowedProviders(address[] calldata providers_) external onlyOwner {
+        for (uint256 index = 0; index <= providers_.length; index++) {
+            require(providers_[index] != address(0), "Invalid providers_");
+
+            isAllowedProvider[providers_[index]] = true;
+        }
+    }
+
+    function unsetAllowedProviders(address[] calldata providers_) external onlyOwner {
+        for (uint256 index = 0; index <= providers_.length; index++) {
+            require(providers_[index] != address(0), "Invalid providers_");
+
+            isAllowedProvider[providers_[index]] = false;
+        }
+    }
+
+    function getRewardTokens() external view returns (address[] memory) {
+        return rewardTokens;
+    }
+
+    function getRewardTokensCount() external view returns (uint256) {
+        return rewardTokens.length;
+    }
+
+    // by validators
+    function increaseMinterRewards(
+        address minter,
+        address rewardToken,
+        uint256 amount
+    ) external override onlyAllowedProvider nonReentrant whenNotPaused {
+        require(_isRewardToken[rewardToken], "Not a reward token");
+        require(lastRewardsIncreaseEpoch[minter][rewardToken] < epochNumber, "Already increased reward for the epoch");
+
+        claimableRewards[minter][rewardToken] += amount;
+        totalDistributed[rewardToken] += amount;
+        lastRewardsIncreaseEpoch[minter][rewardToken] = epochNumber;
+        emit IncreaseMinterRewards(minter, rewardToken, amount);
+    }
+
+    function bulkIncreaseMinterRewards(
+        address rewardToken,
+        address[] calldata minters,
+        uint256[] calldata amounts
+    ) external override onlyAllowedProvider nonReentrant whenNotPaused {
+        require(_isRewardToken[rewardToken], "Not a reward token");
+        require(minters.length == amounts.length, "Minters and amounts length should be equal");
+
+        for (uint256 i = 0; i < minters.length; i++) {
+            address minter = minters[i];
+            uint256 amount = amounts[i];
+            if (lastRewardsIncreaseEpoch[minter][rewardToken] >= epochNumber) {
+                continue;
+            }
+
+            claimableRewards[minter][rewardToken] += amount;
+            totalDistributed[rewardToken] += amount;
+            lastRewardsIncreaseEpoch[minter][rewardToken] = epochNumber;
+            emit IncreaseMinterRewards(minter, rewardToken, amount);
+        }
+    }
+
     /**
      * @dev This function will pull the funds from caller and must be approved using estimateFees
      * @param asset_ address of the asset
@@ -253,42 +344,17 @@ contract ArableFeeCollector is
         }
     }
 
-    function setAllowedProvider(address provider_) external onlyOwner {
-        isAllowedProvider[provider_] = true;
-    }
-
-    function unsetAllowedProvider(address provider_) external onlyOwner {
-        isAllowedProvider[provider_] = false;
-    }
-
-    function setAllowedProviders(address[] calldata providers_) external onlyOwner {
-        for (uint256 index = 0; index <= providers_.length; index++) {
-            isAllowedProvider[providers_[index]] = true;
-        }
-    }
-
-    function unsetAllowedProviders(address[] calldata providers_) external onlyOwner {
-        for (uint256 index = 0; index <= providers_.length; index++) {
-            isAllowedProvider[providers_[index]] = false;
-        }
-    }
-
     function setRewardTokens(address[] memory _rewardTokens) public override onlyOwner {
         deleteRewardTokens();
         for (uint256 i = 0; i < _rewardTokens.length; i++) {
             address rewardToken = _rewardTokens[i];
+            require(rewardToken != address(0), "Invalid rewardTokens");
+
             rewardTokens.push(rewardToken);
+            require(!_isRewardToken[rewardToken], "duplicated token");
             _isRewardToken[rewardToken] = true;
         }
         emit SetRewardTokens(_rewardTokens);
-    }
-
-    function getRewardTokens() external view returns (address[] memory) {
-        return rewardTokens;
-    }
-
-    function getRewardTokensCount() external view returns (uint256) {
-        return rewardTokens.length;
     }
 
     function deleteRewardTokens() public override onlyOwner {
@@ -311,43 +377,6 @@ contract ArableFeeCollector is
         for (uint256 i = 0; i < rewardTokens.length; i++) {
             address rewardToken = rewardTokens[i];
             emit SetEpochTokenRewards(epochNumber, rewardToken, getTotalDistributableRewards(rewardToken));
-        }
-    }
-
-    // by validators
-    function increaseMinterRewards(
-        address minter,
-        address rewardToken,
-        uint256 amount
-    ) external override onlyAllowedProvider nonReentrant whenNotPaused {
-        require(_isRewardToken[rewardToken], "Not a reward token");
-        require(lastRewardsIncreaseEpoch[minter][rewardToken] < epochNumber, "Already increased reward for the epoch");
-
-        claimableRewards[minter][rewardToken] += amount;
-        totalDistributed[rewardToken] += amount;
-        lastRewardsIncreaseEpoch[minter][rewardToken] = epochNumber;
-        emit IncreaseMinterRewards(minter, rewardToken, amount);
-    }
-
-    function bulkIncreaseMinterRewards(
-        address rewardToken,
-        address[] calldata minters,
-        uint256[] calldata amounts
-    ) external override onlyAllowedProvider nonReentrant whenNotPaused {
-        require(_isRewardToken[rewardToken], "Not a reward token");
-        require(minters.length == amounts.length, "Minters and amounts length should be equal");
-
-        for (uint256 i = 0; i < minters.length; i++) {
-            address minter = minters[i];
-            uint256 amount = amounts[i];
-            if (lastRewardsIncreaseEpoch[minter][rewardToken] >= epochNumber) {
-                continue;
-            }
-
-            claimableRewards[minter][rewardToken] += amount;
-            totalDistributed[rewardToken] += amount;
-            lastRewardsIncreaseEpoch[minter][rewardToken] = epochNumber;
-            emit IncreaseMinterRewards(minter, rewardToken, amount);
         }
     }
 
@@ -375,23 +404,5 @@ contract ArableFeeCollector is
 
     function getTotalDistributableRewards(address rewardToken) public view override returns (uint256) {
         return IERC20(rewardToken).balanceOf(address(this)) + totalClaimed[rewardToken] - totalDistributed[rewardToken];
-    }
-
-    /**
-     * @notice Triggers stopped state
-     * @dev Only possible when contract not paused.
-     */
-    function pause() external onlyOwner whenNotPaused {
-        _pause();
-        emit Pause();
-    }
-
-    /**
-     * @notice Returns to normal state
-     * @dev Only possible when contract is paused.
-     */
-    function unpause() external onlyOwner whenPaused {
-        _unpause();
-        emit Unpause();
     }
 }
