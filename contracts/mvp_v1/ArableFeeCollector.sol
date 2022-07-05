@@ -233,7 +233,7 @@ contract ArableFeeCollector is
     }
 
     function setAllowedProviders(address[] calldata providers_) external onlyOwner {
-        for (uint256 index = 0; index <= providers_.length; index++) {
+        for (uint256 index = 0; index < providers_.length; index++) {
             require(providers_[index] != address(0), "Invalid providers_");
 
             isAllowedProvider[providers_[index]] = true;
@@ -241,7 +241,7 @@ contract ArableFeeCollector is
     }
 
     function unsetAllowedProviders(address[] calldata providers_) external onlyOwner {
-        for (uint256 index = 0; index <= providers_.length; index++) {
+        for (uint256 index = 0; index < providers_.length; index++) {
             require(providers_[index] != address(0), "Invalid providers_");
 
             isAllowedProvider[providers_[index]] = false;
